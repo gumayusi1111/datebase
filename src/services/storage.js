@@ -1,43 +1,39 @@
 // 使用localStorage存储数据
 // localStorage是浏览器提供的简单存储机制，可以在用户浏览器中保存数据
 
+import { fetchData, saveData as apiSaveData, searchData as apiSearchData } from './api';
+
+// 本地缓存
+let cachedData = null;
+
 /**
- * 保存一条新数据到本地存储
+ * 保存一条新数据
  * @param {Object} item - 要保存的数据项
  */
-const saveData = (item) => {
-  // 获取现有数据
-  const existingData = getData();
-  // 添加新数据
-  existingData.push(item);
-  // 保存回localStorage
-  localStorage.setItem('personalData', JSON.stringify(existingData));
+const saveData = async (item) => {
+  await apiSaveData(item);
+  // 清除缓存，强制下次获取最新数据
+  cachedData = null;
 };
 
 /**
- * 从本地存储获取所有数据
+ * 获取所有存储的数据
  * @returns {Array} 所有存储的数据项
  */
-const getData = () => {
-  // 从localStorage获取数据
-  const data = localStorage.getItem('personalData');
-  // 如果有数据则解析JSON，否则返回空数组
-  return data ? JSON.parse(data) : [];
+const getData = async () => {
+  if (!cachedData) {
+    cachedData = await fetchData();
+  }
+  return cachedData;
 };
 
 /**
- * 根据查询字符串搜索数据
- * @param {string} query - 搜索查询
+ * 搜索数据
+ * @param {string} query - 搜索查询字符串
  * @returns {Array} 匹配的数据项
  */
-const searchData = (query) => {
-  // 获取所有数据
-  const data = getData();
-  // 过滤出包含查询字符串的数据项
-  return data.filter(item => 
-    item.text.toLowerCase().includes(query.toLowerCase()) ||
-    item.title.toLowerCase().includes(query.toLowerCase())
-  );
+const searchData = async (query) => {
+  return apiSearchData(query);
 };
 
 // 导出这些函数以便其他组件使用
