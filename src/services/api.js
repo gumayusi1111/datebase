@@ -33,23 +33,12 @@ export const fetchData = async () => {
 /**
  * 保存新数据
  */
-export const saveData = async (data) => {
+export const saveData = async (formData) => {
   try {
-    const formData = new FormData();
-    formData.append('id', data.id);
-    formData.append('title', data.title);
-    formData.append('text', data.text);
-    
-    // 如果有图片，将Base64转换为文件
-    if (data.image && data.image.startsWith('data:image')) {
-      const imageFile = dataURLtoFile(data.image, 'image.jpg');
-      formData.append('image', imageFile);
-    }
-    
-    // 如果有音频，将Base64转换为文件
-    if (data.audio && data.audio.startsWith('data:audio')) {
-      const audioFile = dataURLtoFile(data.audio, 'audio.mp3');
-      formData.append('audio', audioFile);
+    console.log('API: 正在保存数据...');
+    console.log('API: FormData 内容:');
+    for (let [key, value] of formData.entries()) {
+      console.log(`${key}: ${value instanceof File ? value.name : value}`);
     }
     
     const response = await axios.post(`${API_URL}/data`, formData, {
@@ -58,9 +47,10 @@ export const saveData = async (data) => {
       }
     });
     
+    console.log('API: 数据保存成功:', response.data);
     return response.data;
   } catch (error) {
-    console.error('保存数据失败:', error);
+    console.error('API: 保存数据失败:', error);
     throw error;
   }
 };
@@ -95,4 +85,20 @@ const dataURLtoFile = (dataurl, filename) => {
   }
   
   return new File([u8arr], filename, { type: mime });
+};
+
+/**
+ * 获取标签统计
+ * @returns {Promise<Object>} 标签使用频率统计
+ */
+export const fetchTagStats = async () => {
+  try {
+    console.log('正在获取标签统计...', `${API_URL}/tags/stats`);
+    const response = await axios.get(`${API_URL}/tags/stats`);
+    console.log('标签统计获取成功:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('获取标签统计失败:', error);
+    throw error;
+  }
 }; 

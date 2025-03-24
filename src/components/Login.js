@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { login } from '../services/auth';
 
+// 直接在组件中定义常量
+const USER_KEY = 'user';
+const TOKEN_KEY = 'token';
+
 /**
  * 登录组件 - 允许用户登录系统
  * @param {Object} props - 组件属性
@@ -16,7 +20,7 @@ const Login = ({ onLoginSuccess, onSwitchToRegister }) => {
   /**
    * 处理登录表单提交
    */
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     
     if (!username || !password) {
@@ -29,11 +33,21 @@ const Login = ({ onLoginSuccess, onSwitchToRegister }) => {
     
     try {
       const user = await login(username, password);
+      console.log('登录成功:', user);
+      console.log('localStorage 中的用户:', localStorage.getItem(USER_KEY));
+      console.log('localStorage 中的令牌:', localStorage.getItem(TOKEN_KEY));
+      
+      // 确保用户信息正确保存
       if (onLoginSuccess) {
         onLoginSuccess(user);
       }
-    } catch (err) {
-      setError(err.response?.data?.error || '登录失败，请检查用户名和密码');
+    } catch (error) {
+      console.error('登录失败:', error);
+      if (error.response && error.response.data && error.response.data.error) {
+        setError(error.response.data.error);
+      } else {
+        setError('登录失败，请稍后再试');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -52,7 +66,7 @@ const Login = ({ onLoginSuccess, onSwitchToRegister }) => {
           </div>
         )}
         
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleLogin}>
           <div className="form-group">
             <label htmlFor="username">
               <i className="fas fa-user"></i> 用户名

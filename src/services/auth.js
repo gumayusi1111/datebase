@@ -1,8 +1,11 @@
 import axios from 'axios';
 
 const API_URL = 'http://localhost:3001/api';
-const TOKEN_KEY = 'auth_token';
-const USER_KEY = 'auth_user';
+const TOKEN_KEY = 'token';
+const USER_KEY = 'user';
+
+// 导出常量
+export { TOKEN_KEY, USER_KEY };
 
 /**
  * 注册新用户
@@ -53,6 +56,9 @@ export const login = async (username, password) => {
     // 设置默认Authorization头
     setAuthHeader(token);
     
+    console.log('登录成功，保存的用户:', user);
+    console.log('登录成功，保存的令牌:', token);
+    
     return user;
   } catch (error) {
     console.error('登录失败:', error);
@@ -72,17 +78,29 @@ export const logout = () => {
 };
 
 /**
- * 获取当前用户
- * @returns {Object|null} - 当前用户或null
+ * 获取当前登录用户
+ * @returns {Object|null} 当前用户信息或null
  */
 export const getCurrentUser = () => {
-  const userStr = localStorage.getItem(USER_KEY);
-  return userStr ? JSON.parse(userStr) : null;
+  const userJson = localStorage.getItem(USER_KEY);
+  if (!userJson) {
+    console.log('未找到用户信息');
+    return null;
+  }
+  
+  try {
+    const user = JSON.parse(userJson);
+    console.log('当前用户:', user);
+    return user;
+  } catch (error) {
+    console.error('解析用户信息失败:', error);
+    return null;
+  }
 };
 
 /**
  * 获取认证令牌
- * @returns {string|null} - 认证令牌或null
+ * @returns {string|null} 认证令牌或null
  */
 export const getToken = () => {
   return localStorage.getItem(TOKEN_KEY);

@@ -85,9 +85,31 @@ const saveUsers = (users) => {
 // 确保用户数据文件存在
 const ensureUserDataFile = (username) => {
   const userDataFile = path.join(dataDir, `${username}.json`);
+  console.log('确保用户数据文件存在:', userDataFile);
+  
   if (!fs.existsSync(userDataFile)) {
+    console.log('创建新的用户数据文件:', userDataFile);
     fs.writeFileSync(userDataFile, JSON.stringify([]));
+  } else {
+    console.log('用户数据文件已存在:', userDataFile);
+    // 验证文件是否可读
+    try {
+      const data = JSON.parse(fs.readFileSync(userDataFile, 'utf8'));
+      console.log(`文件包含 ${data.length} 条数据`);
+    } catch (error) {
+      console.error('读取用户数据文件失败，重新创建:', error);
+      fs.writeFileSync(userDataFile, JSON.stringify([]));
+    }
   }
+  
+  // 检查文件权限
+  try {
+    fs.accessSync(userDataFile, fs.constants.R_OK | fs.constants.W_OK);
+    console.log('文件权限正常，可读可写');
+  } catch (error) {
+    console.error('文件权限问题:', error);
+  }
+  
   return userDataFile;
 };
 
@@ -247,35 +269,110 @@ app.get('/api/data', authenticateToken, (req, res) => {
 
 // 添加新数据
 app.post('/api/data', authenticateToken, upload.fields([
-  { name: 'image', maxCount: 1 },
-  { name: 'audio', maxCount: 1 }
+  { name: 'image', maxCount: 5 },
+  { name: 'audio', maxCount: 5 }
 ]), (req, res) => {
   try {
-    const { title, text, id } = req.body;
+    const { 
+      title, 
+      text, 
+      id, 
+      tags, 
+      location,
+      transcript 
+    } = req.body;
+    
+    console.log('收到新数据请求:', { title, id });
+    console.log('标签数据:', tags);
+    console.log('用户信息:', req.user);
+    
     const userDataFile = ensureUserDataFile(req.user.username);
-    const data = JSON.parse(fs.readFileSync(userDataFile, 'utf8'));
+    console.log('用户数据文件路径:', userDataFile);
+    
+    // 读取现有数据
+    let data = [];
+    try {
+      data = JSON.parse(fs.readFileSync(userDataFile, 'utf8'));
+      console.log(`读取到 ${data.length} 条现有数据`);
+    } catch (error) {
+      console.error('读取用户数据文件失败，创建新文件:', error);
+      data = [];
+    }
+    
+    let parsedTags = [];
+    if (tags) {
+      try {
+        parsedTags = JSON.parse(tags);
+        console.log('解析后的标签:', parsedTags);
+      } catch (e) {
+        console.error('解析标签失败:', e);
+      }
+    }
     
     const newItem = {
       id: id || Date.now().toString(),
       title,
       text,
+      tags: parsedTags,
       timestamp: Date.now(),
-      user: req.user.username
+      lastModified: Date.now(),
+      user: req.user.username,
+      location: location ? JSON.parse(location) : null,
+      media: []
     };
     
     // 处理上传的文件
     if (req.files) {
+      // 处理图片
       if (req.files.image) {
-        newItem.image = `/media/${req.files.image[0].filename}`;
+        req.files.image.forEach(file => {
+          newItem.media.push({
+            type: 'image',
+            url: `/media/${file.filename}`,
+            caption: ''
+          });
+        });
       }
       
+      // 处理音频
       if (req.files.audio) {
-        newItem.audio = `/media/${req.files.audio[0].filename}`;
+        req.files.audio.forEach((file, index) => {
+          const transcriptText = Array.isArray(transcript) 
+            ? transcript[index] 
+            : transcript;
+            
+          newItem.media.push({
+            type: 'audio',
+            url: `/media/${file.filename}`,
+            duration: 0, // 客户端应该提供这个值
+            transcript: transcriptText || ''
+          });
+        });
       }
     }
     
+    // 添加新数据
     data.push(newItem);
-    fs.writeFileSync(userDataFile, JSON.stringify(data, null, 2));
+    
+    // 写入文件
+    const dataStr = JSON.stringify(data, null, 2);
+    console.log('准备写入文件:', userDataFile);
+    console.log('数据长度:', dataStr.length, '字节');
+    
+    fs.writeFileSync(userDataFile, dataStr);
+    
+    // 验证文件是否存在
+    if (fs.existsSync(userDataFile)) {
+      const stats = fs.statSync(userDataFile);
+      console.log('文件已写入, 大小:', stats.size, '字节');
+      
+      // 读取文件内容进行验证
+      const verifyData = JSON.parse(fs.readFileSync(userDataFile, 'utf8'));
+      console.log('验证: 文件中有 ' + verifyData.length + ' 条数据');
+      console.log('最新数据:', verifyData[verifyData.length - 1].title);
+    } else {
+      console.error('文件写入后不存在!');
+    }
     
     res.status(201).json(newItem);
   } catch (error) {
@@ -307,7 +404,87 @@ app.get('/api/search', authenticateToken, (req, res) => {
   }
 });
 
-// 启动服务器
+// 获取用户标签统计
+app.get('/api/tags/stats', authenticateToken, (req, res) => {
+  try {
+    console.log('收到标签统计请求:', req.user.username);
+    const userDataFile = ensureUserDataFile(req.user.username);
+    console.log('用户数据文件路径:', userDataFile);
+    
+    const data = JSON.parse(fs.readFileSync(userDataFile, 'utf8'));
+    console.log('用户数据条目数量:', data.length);
+    
+    // 计算标签使用频率
+    const tagStats = {};
+    let tagCount = 0;
+    
+    data.forEach((item, index) => {
+      console.log(`检查数据项 #${index}:`, item.title);
+      if (item.tags && Array.isArray(item.tags)) {
+        console.log(`  数据项 #${index} 包含 ${item.tags.length} 个标签:`, item.tags);
+        item.tags.forEach(tag => {
+          tagStats[tag] = (tagStats[tag] || 0) + 1;
+          tagCount++;
+        });
+      } else {
+        console.log(`  数据项 #${index} 没有标签`);
+      }
+    });
+    
+    console.log(`共找到 ${tagCount} 个标签实例，${Object.keys(tagStats).length} 个不同标签`);
+    console.log('返回标签统计:', tagStats);
+    res.json(tagStats);
+  } catch (error) {
+    console.error('获取标签统计失败:', error);
+    res.status(500).json({ error: '获取标签统计失败' });
+  }
+});
+
+// 添加一个新的API端点，用于查看文件内容
+app.get('/api/debug/file/:username', (req, res) => {
+  try {
+    const username = req.params.username;
+    const filePath = path.join(dataDir, `${username}.json`);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: '文件不存在' });
+    }
+    
+    const fileContent = fs.readFileSync(filePath, 'utf8');
+    const fileStats = fs.statSync(filePath);
+    
+    res.json({
+      filename: `${username}.json`,
+      path: filePath,
+      size: fileStats.size,
+      content: fileContent
+    });
+  } catch (error) {
+    console.error('读取文件失败:', error);
+    res.status(500).json({ error: '读取文件失败' });
+  }
+});
+
+// 在服务器启动时检查文件系统权限
 app.listen(PORT, () => {
   console.log(`服务器运行在 http://localhost:${PORT}`);
+  
+  // 检查数据目录权限
+  try {
+    const testFile = path.join(dataDir, 'test-write.txt');
+    fs.writeFileSync(testFile, 'test');
+    console.log('数据目录可写');
+    fs.unlinkSync(testFile);
+  } catch (error) {
+    console.error('数据目录权限问题:', error);
+  }
+  
+  console.log('可用API端点:');
+  console.log('- POST /api/register - 注册新用户');
+  console.log('- POST /api/login - 用户登录');
+  console.log('- GET /api/data - 获取用户数据');
+  console.log('- POST /api/data - 添加新数据');
+  console.log('- GET /api/search - 搜索数据');
+  console.log('- GET /api/tags/stats - 获取标签统计');
+  console.log('- GET /api/debug/file/:username - 查看文件内容');
 }); 
