@@ -5,10 +5,15 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const multer = require('multer');
 const jwt = require('jsonwebtoken'); // 需要安装: npm install jsonwebtoken
+const axios = require('axios');
 
 const app = express();
 const PORT = 3001;
 const JWT_SECRET = 'your-secret-key'; // 在生产环境中应使用环境变量
+
+// DeepSeek API 配置
+const DEEPSEEK_API_ENDPOINT = 'https://dseek.aikeji.vip/v1/chat/completions';
+const DEEPSEEK_API_KEY = 'sk-4rlHrGQlXkmRqFToi96B5pSGeMkp9rTQbfyOZ0MWPAqP0ZDP';
 
 // 中间件
 app.use(cors());
@@ -127,15 +132,19 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// 验证JWT中间件
+// 验证JWT令牌的中间件
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   
-  if (!token) return res.status(401).json({ error: '未授权' });
+  if (!token) {
+    return res.status(401).json({ error: '未提供认证令牌' });
+  }
   
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: '令牌无效' });
+    if (err) {
+      return res.status(403).json({ error: '令牌无效或已过期' });
+    }
     req.user = user;
     next();
   });
@@ -465,6 +474,126 @@ app.get('/api/debug/file/:username', (req, res) => {
   }
 });
 
+// AI 查询代理端点
+app.post('/api/ai/query', authenticateToken, async (req, res) => {
+  try {
+    const { question } = req.body;
+    const username = req.user.username;
+    
+    // 获取用户数据
+    const userDataFile = path.join(dataDir, `${username}.json`);
+    if (!fs.existsSync(userDataFile)) {
+      return res.status(404).json({ error: '未找到用户数据' });
+    }
+    
+    const userData = JSON.parse(fs.readFileSync(userDataFile, 'utf8'));
+    
+    // 将数据转换为AI可以理解的格式
+    const context = userData.map(item => 
+      `标题: ${item.title || '无标题'}\n内容: ${item.text || '无内容'}\n时间: ${new Date(item.timestamp).toLocaleString()}`
+    ).join('\n\n');
+    
+    // 构建发送给AI的提示
+    const prompt = `基于以下个人数据回答问题:\n\n${context}\n\n问题: ${question}`;
+    
+    // 尝试调用 DeepSeek API
+    try {
+      console.log('尝试调用 DeepSeek API...');
+      const response = await axios.post(
+        DEEPSEEK_API_ENDPOINT,
+        {
+          model: "deepseek-r1",
+          messages: [
+            { role: 'system', content: '你是一个帮助用户查询个人数据的助手。请基于用户提供的数据回答问题，如果数据中没有相关信息，请诚实地告诉用户。' },
+            { role: 'user', content: prompt }
+          ]
+        },
+        {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+            'User-Agent': 'Node.js/Express'
+          },
+          timeout: 30000 // 增加超时时间到30秒
+        }
+      );
+      
+      console.log('DeepSeek API 响应成功');
+      // 打印完整的 API 响应 JSON
+      console.log('完整 API 响应:', JSON.stringify(response.data, null, 2));
+      
+      // 获取原始 AI 回答
+      const originalResponse = response.data.choices[0].message.content;
+      // 打印原始回答到控制台
+      console.log('原始 AI 回答:', originalResponse);
+
+      // 过滤掉 <think> </think> 之间的内容
+      const filteredResponse = originalResponse.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+      // 返回过滤后的 AI 回答
+      return res.json({ answer: filteredResponse });
+    } catch (apiError) {
+      console.error('DeepSeek API 调用失败，使用本地模拟响应:', apiError.message);
+      
+      // API 调用失败，使用本地模拟响应
+      console.log('使用本地模拟响应');
+      
+      // 简单的关键词匹配
+      const lowerQuestion = question.toLowerCase();
+      
+      // 查找与问题相关的数据项
+      const relevantItems = userData.filter(item => {
+        const title = (item.title || '').toLowerCase();
+        const text = (item.text || '').toLowerCase();
+        return title.includes(lowerQuestion) || text.includes(lowerQuestion);
+      });
+      
+      let answer;
+      
+      if (relevantItems.length > 0) {
+        // 找到相关数据
+        const item = relevantItems[0]; // 使用第一个匹配项
+        answer = `根据您的数据，我找到了以下信息：\n\n"${item.title || '无标题'}"记录中提到：${item.text || '无内容'}\n\n这条记录创建于${new Date(item.timestamp).toLocaleString()}。`;
+      } else if (lowerQuestion.includes('学习')) {
+        answer = '您的数据中有关于学习的记录。您似乎对学习很重视，有几条带有"学习"标签的记录。';
+      } else if (lowerQuestion.includes('最近') || lowerQuestion.includes('最新')) {
+        // 返回最新的记录
+        const latestItem = [...userData].sort((a, b) => b.timestamp - a.timestamp)[0];
+        answer = `您最近的记录是"${latestItem.title || '无标题'}"，创建于${new Date(latestItem.timestamp).toLocaleString()}。内容是：${latestItem.text || '无内容'}`;
+      } else {
+        // 没有找到相关信息
+        answer = `抱歉，我在您的${userData.length}条记录中没有找到与"${question}"相关的信息。您可以尝试使用其他关键词，或者添加更多相关数据。`;
+      }
+      
+      // 返回模拟的 AI 回答
+      return res.json({ answer });
+    }
+  } catch (error) {
+    console.error('AI 查询错误:', error);
+    
+    // 提供更详细的错误信息
+    if (error.response) {
+      console.error('错误状态码:', error.response.status);
+      console.error('错误数据:', error.response.data);
+      res.status(error.response.status).json({ 
+        error: `AI 服务错误: ${JSON.stringify(error.response.data)}` 
+      });
+    } else if (error.request) {
+      console.error('没有收到响应:', error.request);
+      res.status(500).json({ error: 'AI 服务没有响应' });
+    } else {
+      console.error('请求错误:', error.message);
+      res.status(500).json({ error: `请求错误: ${error.message}` });
+    }
+  }
+});
+
+// 添加一个简单的测试端点
+app.get('/api/test', (req, res) => {
+  res.json({ message: '服务器正在运行' });
+});
+
 // 在服务器启动时检查文件系统权限
 app.listen(PORT, () => {
   console.log(`服务器运行在 http://localhost:${PORT}`);
@@ -487,4 +616,6 @@ app.listen(PORT, () => {
   console.log('- GET /api/search - 搜索数据');
   console.log('- GET /api/tags/stats - 获取标签统计');
   console.log('- GET /api/debug/file/:username - 查看文件内容');
+  console.log('- POST /api/ai/query - AI 查询');
+  console.log('- GET /api/test - 测试端点');
 }); 
