@@ -495,79 +495,81 @@ app.post('/api/ai/query', authenticateToken, async (req, res) => {
     
     // 构建发送给AI的提示
     const prompt = `基于以下个人数据回答问题:\n\n${context}\n\n问题: ${question}`;
-    
-    // 尝试调用 DeepSeek API
-    try {
-      console.log('尝试调用 DeepSeek API...');
-      const response = await axios.post(
-        DEEPSEEK_API_ENDPOINT,
-        {
-          model: "deepseek-r1",
-          messages: [
-            { role: 'system', content: '你是一个帮助用户查询个人数据的助手。请基于用户提供的数据回答问题，如果数据中没有相关信息，请诚实地告诉用户。' },
-            { role: 'user', content: prompt }
-          ]
-        },
-        {
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
-            'User-Agent': 'Node.js/Express'
-          },
-          timeout: 30000 // 增加超时时间到30秒
+
+    // 在 AI 查询端点中添加重试逻辑
+    let retries = 3;
+    let retryDelay = 1000; // 1秒
+
+    async function callDeepSeekWithRetry() {
+      for (let i = 0; i < retries; i++) {
+        try {
+          console.log(`尝试调用 DeepSeek API... (尝试 ${i+1}/${retries})`);
+          const response = await axios.post(
+            DEEPSEEK_API_ENDPOINT,
+            {
+              model: "deepseek-r1", // 使用 deepseek-chat 模型
+              messages: [
+                { role: 'system', content: '你是一个帮助用户查询个人数据的助手。请基于用户提供的数据回答问题，如果数据中没有相关信息，请诚实地告诉用户。' },
+                { role: 'user', content: prompt }
+              ]
+            },
+            {
+              headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+                'User-Agent': 'Node.js/Express'
+              },
+              timeout: 30000 // 增加超时时间到30秒
+            }
+          );
+          
+          console.log('DeepSeek API 响应成功');
+          // 打印完整的 API 响应 JSON
+          console.log('完整 API 响应:', JSON.stringify(response.data, null, 2));
+          
+          // 获取原始 AI 回答
+          const originalResponse = response.data.choices[0].message.content;
+          // 打印原始回答到控制台
+          console.log('原始 AI 回答:', originalResponse);
+
+          // 过滤掉 <think> </think> 之间的内容
+          const filteredResponse = originalResponse.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+          // 返回过滤后的 AI 回答
+          return filteredResponse;
+        } catch (error) {
+          if (error.response && error.response.status === 503 && i < retries - 1) {
+            console.log(`遇到 503 错误，${retryDelay/1000}秒后重试...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            retryDelay *= 2; // 指数退避
+            continue;
+          }
+          throw error; // 重试失败或其他错误，抛出异常
         }
-      );
-      
-      console.log('DeepSeek API 响应成功');
-      // 打印完整的 API 响应 JSON
-      console.log('完整 API 响应:', JSON.stringify(response.data, null, 2));
-      
-      // 获取原始 AI 回答
-      const originalResponse = response.data.choices[0].message.content;
-      // 打印原始回答到控制台
-      console.log('原始 AI 回答:', originalResponse);
-
-      // 过滤掉 <think> </think> 之间的内容
-      const filteredResponse = originalResponse.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
-      // 返回过滤后的 AI 回答
-      return res.json({ answer: filteredResponse });
-    } catch (apiError) {
-      console.error('DeepSeek API 调用失败，使用本地模拟响应:', apiError.message);
-      
-      // API 调用失败，使用本地模拟响应
-      console.log('使用本地模拟响应');
-      
-      // 简单的关键词匹配
-      const lowerQuestion = question.toLowerCase();
-      
-      // 查找与问题相关的数据项
-      const relevantItems = userData.filter(item => {
-        const title = (item.title || '').toLowerCase();
-        const text = (item.text || '').toLowerCase();
-        return title.includes(lowerQuestion) || text.includes(lowerQuestion);
-      });
-      
-      let answer;
-      
-      if (relevantItems.length > 0) {
-        // 找到相关数据
-        const item = relevantItems[0]; // 使用第一个匹配项
-        answer = `根据您的数据，我找到了以下信息：\n\n"${item.title || '无标题'}"记录中提到：${item.text || '无内容'}\n\n这条记录创建于${new Date(item.timestamp).toLocaleString()}。`;
-      } else if (lowerQuestion.includes('学习')) {
-        answer = '您的数据中有关于学习的记录。您似乎对学习很重视，有几条带有"学习"标签的记录。';
-      } else if (lowerQuestion.includes('最近') || lowerQuestion.includes('最新')) {
-        // 返回最新的记录
-        const latestItem = [...userData].sort((a, b) => b.timestamp - a.timestamp)[0];
-        answer = `您最近的记录是"${latestItem.title || '无标题'}"，创建于${new Date(latestItem.timestamp).toLocaleString()}。内容是：${latestItem.text || '无内容'}`;
-      } else {
-        // 没有找到相关信息
-        answer = `抱歉，我在您的${userData.length}条记录中没有找到与"${question}"相关的信息。您可以尝试使用其他关键词，或者添加更多相关数据。`;
       }
-      
-      // 返回模拟的 AI 回答
+    }
+
+    try {
+      const answer = await callDeepSeekWithRetry();
       return res.json({ answer });
+    } catch (error) {
+      console.error('AI 查询错误:', error);
+      
+      // 提供更详细的错误信息
+      if (error.response) {
+        console.error('错误状态码:', error.response.status);
+        console.error('错误数据:', error.response.data);
+        res.status(error.response.status).json({ 
+          error: `AI 服务错误: ${JSON.stringify(error.response.data)}` 
+        });
+      } else if (error.request) {
+        console.error('没有收到响应:', error.request);
+        res.status(500).json({ error: 'AI 服务没有响应' });
+      } else {
+        console.error('请求错误:', error.message);
+        res.status(500).json({ error: `请求错误: ${error.message}` });
+      }
     }
   } catch (error) {
     console.error('AI 查询错误:', error);

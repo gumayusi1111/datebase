@@ -1,0 +1,51 @@
+:root {
+  /* 浅色主题变量 */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --text-primary: #333333;
+  --text-secondary: #666666;
+  --border-color: #e0e0e0;
+  --accent-color: #4a6cf7;
+  --error-color: #e53935;
+  --success-color: #43a047;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* 深色主题变量 */
+.dark {
+  --bg-primary: #121212;
+  --bg-secondary: #1e1e1e;
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0a0;
+  --border-color: #333333;
+  --accent-color: #738eff;
+  --error-color: #ef5350;
+  --success-color: #66bb6a;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* 应用主题变量到元素 */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.card, .panel {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--card-shadow);
+}
+
+input, textarea, select {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+button {
+  background-color: var(--accent-color);
+  color: white;
+}
+
+/* 其他元素样式... */ 
